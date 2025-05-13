@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Block Dungeon</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; overflow: hidden; background-color: black; }
+        canvas { display: block; margin: 0 auto; background-color: #2a2a2a; }
+        .popup { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 20px; background: rgba(0, 0, 0, 0.7); color: white; border-radius: 10px; text-align: center; }
+        #settingsPopup, #gameOverPopup, #victoryPopup { display: none; }
+        #playButton { padding: 10px 20px; font-size: 18px; background-color: #4CAF50; color: white; border: none; cursor: pointer; }
+        #playButton:hover { background-color: #45a049; }
+    </style>
+</head>
+<body>
+    <div id="settingsPopup" class="popup">
+        <h2>Settings</h2>
+        <label for="difficultySelect">Select Difficulty: </label>
+        <select id="difficultySelect">
+            <option value="normal">Normal</option>
+            <option value="hard">Hard</option>
+        </select>
+        <br><br>
+        <button onclick="resumeGame()">Resume Game</button>
+        <button onclick="restartGame()">Restart Game</button>
+        <button onclick="closeSettings()">Close</button>
+    </div>
+
+    <div id="gameOverPopup" class="popup">
+        <h2>Game Over</h2>
+        <p>Your health has reached zero. Better luck next time!</p>
+        <button onclick="restartGame()">Restart</button>
+    </div>
+
+    <div id="victoryPopup" class="popup">
+        <h2>You Won!</h2>
+        <p>Congratulations! You've cleared the dungeon.</p>
+        <button onclick="restartGame()">Restart</button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+    <button id="playButton" onclick="startGame()">Play</button>
+
+    <script>
+        // Game Variables
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        let playerX = 50, playerY = 50, playerSize = 32, playerHealth = 100, shieldActive = false, shieldDuration = 0;
+        let swordSwing = false, enemies = [], particles = [], boss = null, currentRoom = 0, nextRoomUpgrade = null;
+        let swordSwingProgress = 0, difficulty = 'normal', gameRunning = false;
+
+        // Settings Popup Functions
+        function openSettings() { document.getElementById('settingsPopup').style.display = 'block'; }
+        function closeSettings() { document.getElementById('settingsPopup').style.display = 'none'; }
+        function resumeGame() { gameRunning = true; document.getElementById('settingsPopup').style.display = 'none'; gameLoop(); }
+
+        // Start the Game
+        function startGame() {
+            document.getElementById("playButton").style.display = "none";
+            canvas.style.display = "block";
+            gameRunning = true;
+            canvas.width = 800;  // Set canvas width
+            canvas.height = 600; // Set canvas height
+            setDifficulty('normal');
+            spawnEnemies();
+            gameLoop();
+        }
+
+        // Set Difficulty
+        function setDifficulty(newDifficulty) {
+            difficulty = newDifficulty;
+            if (difficulty === 'hard') {
+                enemies.forEach(enemy => enemy.health *= 2);
+                playerHealth = 80;
+                boss.health *= 2;
+            }
+        }
+
+        // Game Loop
+        function gameLoop() {
+            if (gameRunning) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                // Render Game Elements
+                renderRoom();
+                renderPlayer();
+                renderEnemies();
+                handleSwordSwing();
+                handleMinions();
+                handleBoss();
+                renderHealthBar(playerHealth, playerX, playerY - 20);
+                if (shieldActive) {
+                    renderShieldEffect(playerX, playerY);
+                }
+                handleCollisions();
+
+                // Check for Room Completion and Game Over
+                if (enemies.length === 0 && currentRoom < 7) {
+                    showUpgradePopup();
+                }
+                if (playerHealth <= 0) {
+                    gameRunning = false;
+                    showGameOver();
+                }
+
+                requestAnimationFrame(gameLoop);
+            }
+        }
+
+        // Initialize Canvas and Set Up Game Elements
+        canvas.width = 800;
+        canvas.height = 600;
+
+        // Player Movement and Controls
+        let keys = {};
+        window.addEventListener('keydown', (e) => { keys[e.key] = true; });
+        window.addEventListener('keyup', (e) => { keys[e.key] = false; });
+
+        function renderPlayer() {
+            ctx.fillStyle = 'blue'; // Player color
+            ctx.fillRect(playerX, playerY, playerSize, playerSize);
+        }
+
+        function movePlayer() {
+            if (keys['ArrowUp']) playerY -= 3;
+            if (keys['ArrowDown']) playerY += 3;
+            if (keys['ArrowLeft']) playerX -= 3;
+            if (keys['ArrowRight']) playerX += 3;
+        }
+
+        function handleSwordSwing() {
+            if (keys[' '] && !swordSwing) {
+                swordSwing = true;
+                swordSwingProgress = 0;
+            }
+            if (swordSwing) {
+                swordSwingProgress++;
+                if (swordSwingProgress > 10) {
+                    swordSwing = false;
+                }
+            }
+        }
+
+        // Handle Enemies
+        function spawnEnemies() {
+            enemies = []; // Clear previous enemies
+            for (let i = 0; i < 5 + currentRoom; i++) {
+                enemies.push({ x: Math.random() * canvas.width, y: Math.random() * canvas.height, size: 32, health: 3 });
+            }
+            if (currentRoom === 7) { // Boss Room
+                boss = { x: canvas.width / 2, y: canvas.height / 2, size: 64, health: 50 };
+            }
+        }
+
+        function handleMinions() {
+            // Handle minions' movement and collision
+            if (currentRoom === 7 && boss && boss.health <= 5) {
+                summonMinions();
+            }
+            enemies.forEach((enemy, index) => {
+                if (enemy.health <= 0) enemies.splice(index, 1);
+                ctx.fillStyle = 'green';
+                ctx.fillRect(enemy.x, enemy.y, enemy.size, enemy.size);
+                if (swordSwing && isCollisionWithSword(enemy)) {
+                    enemy.health--;
+                    if (enemy.health <= 0) {
+                        // Enemy dies
+                    }
+                }
+            });
+        }
+
+        function summonMinions() {
+            if (Math.random() < 0.02) {
+                let minion = { x: Math.random() * canvas.width, y: Math.random() * canvas.height, size: 32, health: 1 };
+                enemies.push(minion);
+            }
+        }
+
+        function handleBoss() {
+            if (boss) {
+                ctx.fillStyle = 'red';
+                ctx.fillRect(boss.x, boss.y, boss.size, boss.size);
+                if (swordSwing && isCollisionWithSword(boss)) {
+                    boss.health -= 1;
+                    if (boss.health <= 0) {
+                        showVictory();
+                    }
+                }
+            }
+        }
+
+        function renderHealthBar(health, x, y) {
+            ctx.fillStyle = 'red';
+            ctx.fillRect(x, y, health, 10);
+        }
+
+        function isCollisionWithSword(enemy) {
+            return playerX < enemy.x + enemy.size && playerX + playerSize > enemy.x && playerY < enemy.y + enemy.size && playerY + playerSize > enemy.y;
+        }
+
+        // Shield Effect
+        function renderShieldEffect(x, y) {
+            ctx.strokeStyle = 'cyan';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(x + playerSize / 2, y + playerSize / 2, playerSize * 1.2, 0, 2 * Math.PI);
+            ctx.stroke();
+        }
+
+        // Room Completion
+        function showUpgradePopup() {
+            nextRoomUpgrade = ['damage', 'health', 'speed', 'shield'][Math.floor(Math.random() * 4)];
+            alert(`Room ${currentRoom + 1} Cleared! Choose an upgrade: ${nextRoomUpgrade}`);
+            applyUpgrade(nextRoomUpgrade);
+            currentRoom++;
+            spawnEnemies();
+        }
+
+        function applyUpgrade(upgrade) {
+            switch (upgrade) {
+                case 'damage':
+                    playerHealth += 10;
+                    break;
+                case 'health':
+                    playerHealth += 20;
+                    break;
+                case 'speed':
+                    // Increase speed logic (can be added for a speed boost effect)
+                    break;
+                case 'shield':
+                    shieldActive = true;
+                    shieldDuration = 300;  // 300 frames of shield duration
+                    break;
+            }
+        }
+
+        // Handle Shield Effect (e.g., taking reduced damage)
+        function handleCollisions() {
+            if (shieldActive && shieldDuration > 0) {
+                shieldDuration--;
+            } else {
+                shieldActive = false;
+            }
+
+            // Logic for player taking damage based on shield state
+            enemies.forEach(enemy => {
+                if (isCollisionWithSword(enemy)) {
+                    let damage = shieldActive ? 0 : 10;  // Shield blocks damage
+                    playerHealth -= damage;
+                }
+            });
+
+            if (boss) {
+                if (isCollisionWithSword(boss)) {
+                    let damage = shieldActive ? 0 : 10;
+                    playerHealth -= damage;
+                }
+            }
+        }
+
+        // Victory Condition
+        function showVictory() {
+            document.getElementById('victoryPopup').style.display = 'block';
+        }
+
+        // Game Over Condition
+        function showGameOver() {
+            document.getElementById('gameOverPopup').style.display = 'block';
+        }
+
+        function restartGame() {
+            playerHealth = 100;
+            shieldActive = false;
+            shieldDuration = 0;
+            currentRoom = 0;
+            enemies = [];
+            swordSwing = false;
+            boss = null;
+            nextRoomUpgrade = null;
+            gameRunning = false;
+            canvas.style.display = 'none';
+            document.getElementById("playButton").style.display = "block";
+        }
+
+        // Start the Game
+        document.getElementById("playButton").onclick = startGame;
+
+    </script>
+</body>
+</html>
